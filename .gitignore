@@ -1,3 +1,11 @@
+# --- C++ / CMake ---
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+*.o
+*.a
+
 # --- Python ---
 __pycache__/
 *.py[cod]
