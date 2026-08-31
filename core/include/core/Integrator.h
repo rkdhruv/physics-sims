@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ForceModel.h"
 #include "core/System.h"
 
 namespace core {
@@ -12,7 +13,11 @@ enum class Method {
 
 // Advance the system by one timestep, in place. (The Python version returns
 // new arrays instead; here copying the whole state per step would dominate.)
-void step(System& system, double dt, Method method);
+//
+// The integrator knows nothing about the physics -- swapping `forces` between
+// heliocentric N-body and Earth-plus-J2 changes the simulation without
+// touching a line here.
+void step(System& system, double dt, Method method, const ForceModel& forces);
 
 // Human-readable name, for logs and window titles.
 const char* methodName(Method method);

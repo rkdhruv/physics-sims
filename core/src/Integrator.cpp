@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "core/Forces.h"
+#include "core/ForceModel.h"
 
 namespace core {
 namespace {
@@ -15,9 +15,9 @@ struct Scratch {
   std::vector<glm::dvec3> k1x, k1v, k2x, k2v, k3x, k3v, k4x, k4v;
   std::vector<glm::dvec3> temp_positions;
 
-  // The kNv buffers size themselves inside computeAccelerations; these are
-  // written through operator[], which neither bounds-checks nor grows, so they
-  // have to be sized up front.
+  // The kNv buffers are sized by the force model; these are written through
+  // operator[], which neither bounds-checks nor grows, so they have to be
+  // sized up front.
   void ensureSized(std::size_t n) {
     if (k2x.size() == n) return;
     k1x.assign(n, glm::dvec3(0.0));
@@ -37,8 +37,8 @@ thread_local Scratch g;
 //
 // Positions must use the old velocities, so velocities are written second;
 // swapping the loops gives semi-implicit Euler, a different method.
-void stepEuler(System& s, double dt) {
-  computeAccelerations(s, g.a);
+void stepEuler(System& s, double dt, const ForceModel& forces) {
+  forces.accelerations(s, g.a);
 
   const std::size_t n = s.size();
   for (std::size_t i = 0; i < n; ++i) {
@@ -59,16 +59,16 @@ void stepEuler(System& s, double dt) {
 // Updating in place means a_n has to be finished with before anything it
 // depends on is overwritten, hence three separate loops. Interleaving the
 // position and velocity loops silently drops the method to first order.
-void stepVerlet(System& s, double dt) {
+void stepVerlet(System& s, double dt, const ForceModel& forces) {
   const std::size_t n = s.size();
 
-  computeAccelerations(s, g.a);
+  forces.accelerations(s, g.a);
 
   for (std::size_t i = 0; i < n; ++i) {
     s.positions[i] += s.velocities[i] * dt + 0.5 * g.a[i] * dt * dt;
   }
 
-  computeAccelerations(s, g.a_next);
+  forces.accelerations(s, g.a_next);
 
   for (std::size_t i = 0; i < n; ++i) {
     s.velocities[i] += 0.5 * (g.a[i] + g.a_next[i]) * dt;
@@ -86,34 +86,34 @@ void stepVerlet(System& s, double dt) {
 //     y_{n+1} = y_n + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
 //
 // g.temp_positions holds the intermediate positions each stage evaluates at.
-void stepRK4(System& s, double dt) {
+void stepRK4(System& s, double dt, const ForceModel& forces) {
   const std::size_t n = s.size();
   g.ensureSized(n);
 
   // k1 = f(y)
   g.k1x = s.velocities;
-  computeAccelerations(s, g.k1v);
+  forces.accelerations(s, g.k1v);
 
   // k2 = f(y + dt/2 * k1)
   for (std::size_t i = 0; i < n; ++i) {
     g.k2x[i] = s.velocities[i] + 0.5 * dt * g.k1v[i];
     g.temp_positions[i] = s.positions[i] + 0.5 * dt * g.k1x[i];
   }
-  computeAccelerations(g.temp_positions, s.masses, g.k2v);
+  forces.accelerations(g.temp_positions, s.masses, g.k2v);
 
   // k3 = f(y + dt/2 * k2)
   for (std::size_t i = 0; i < n; ++i) {
     g.k3x[i] = s.velocities[i] + 0.5 * dt * g.k2v[i];
     g.temp_positions[i] = s.positions[i] + 0.5 * dt * g.k2x[i];
   }
-  computeAccelerations(g.temp_positions, s.masses, g.k3v);
+  forces.accelerations(g.temp_positions, s.masses, g.k3v);
 
   // k4 = f(y + dt * k3)
   for (std::size_t i = 0; i < n; ++i) {
     g.k4x[i] = s.velocities[i] + dt * g.k3v[i];
     g.temp_positions[i] = s.positions[i] + dt * g.k3x[i];
   }
-  computeAccelerations(g.temp_positions, s.masses, g.k4v);
+  forces.accelerations(g.temp_positions, s.masses, g.k4v);
 
   // y_{n+1} = y_n + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
   const double w = dt / 6.0;
@@ -125,11 +125,11 @@ void stepRK4(System& s, double dt) {
 
 }  // namespace
 
-void step(System& system, double dt, Method method) {
+void step(System& system, double dt, Method method, const ForceModel& forces) {
   switch (method) {
-    case Method::Euler:  stepEuler(system, dt);  return;
-    case Method::Verlet: stepVerlet(system, dt); return;
-    case Method::RK4:    stepRK4(system, dt);    return;
+    case Method::Euler:  stepEuler(system, dt, forces);  return;
+    case Method::Verlet: stepVerlet(system, dt, forces); return;
+    case Method::RK4:    stepRK4(system, dt, forces);    return;
   }
   throw std::logic_error("unknown integration method");
 }

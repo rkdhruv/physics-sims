@@ -29,9 +29,10 @@ target_include_directories(glad PUBLIC vendor/glad/include)
 # stays testable without opening a window.
 # ---------------------------------------------------------------------------
 add_library(core STATIC
-  core/src/Forces.cpp
+  core/src/ForceModel.cpp
   core/src/Integrator.cpp
   core/src/Diagnostics.cpp
+  core/src/Elements.cpp
   core/src/Scenarios.cpp
 )
 target_include_directories(core PUBLIC core/include)
@@ -62,6 +63,9 @@ target_compile_definitions(render PUBLIC
 # ---------------------------------------------------------------------------
 add_executable(orbital scenes/orbital/main.cpp)
 target_link_libraries(orbital PRIVATE core render)
+
+add_executable(satellite scenes/satellite/main.cpp)
+target_link_libraries(satellite PRIVATE core render)
 
 # ---------------------------------------------------------------------------
 # tests -- plain assert-based executable, no test framework dependency.

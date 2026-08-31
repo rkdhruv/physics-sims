@@ -1,14 +1,10 @@
 #include "core/Diagnostics.h"
 
-#include <stdexcept>
-
 #include <glm/geometric.hpp>
-
-#include "core/Units.h"
 
 namespace core {
 
-double totalEnergy(const System& system) {
+double totalEnergy(const System& system, const ForceModel& forces) {
   const std::size_t n = system.size();
 
   double ke = 0.0;
@@ -16,15 +12,7 @@ double totalEnergy(const System& system) {
     ke += 0.5 * system.masses[i] * glm::dot(system.velocities[i], system.velocities[i]);
   }
 
-  double pe = 0.0;
-  for (std::size_t i = 0; i < n; ++i) {
-    for (std::size_t j = i + 1; j < n; ++j) {  // unique pairs only
-      const glm::dvec3 r = system.positions[i] - system.positions[j];
-      pe -= kG * system.masses[i] * system.masses[j] / glm::length(r);
-    }
-  }
-
-  return ke + pe;
+  return ke + forces.potentialEnergy(system.positions, system.masses);
 }
 
 // L = sum_i m_i * (r_i x v_i)
