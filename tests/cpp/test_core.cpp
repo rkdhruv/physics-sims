@@ -17,13 +17,17 @@
 #include <glm/geometric.hpp>
 
 #include "core/Diagnostics.h"
-#include "core/Forces.h"
+#include "core/Elements.h"
+#include "core/ForceModel.h"
 #include "core/Integrator.h"
 #include "core/Scenarios.h"
 #include "core/System.h"
 #include "core/Units.h"
 
 namespace {
+
+// The heliocentric model the week-1/2 scenarios and the Python oracle use.
+const core::NBodyGravity kSolar(core::solar::kG);
 
 int g_failures = 0;
 int g_checks = 0;
@@ -58,10 +62,11 @@ std::string describe(double got, double want) {
 
 // Runs a system forward and returns the final state. Catches the
 // not-implemented exceptions so one missing function doesn't abort the run.
-bool integrate(core::System& system, double dt, double duration, core::Method method) {
+bool integrate(core::System& system, double dt, double duration, core::Method method,
+               const core::ForceModel& forces = kSolar) {
   const int steps = static_cast<int>(std::llround(duration / dt));
   try {
-    for (int i = 0; i < steps; ++i) core::step(system, dt, method);
+    for (int i = 0; i < steps; ++i) core::step(system, dt, method, forces);
   } catch (const std::logic_error& e) {
     skip(e.what());
     return false;
@@ -81,7 +86,7 @@ void testForces() {
 
   core::System s = core::scenarios::testParticle();
   std::vector<glm::dvec3> a;
-  core::computeAccelerations(s, a);
+  kSolar.accelerations(s, a);
 
   // Gravity attracts: a body at +x accelerates toward -x.
   CHECK(a[1].x < 0.0);
@@ -93,13 +98,13 @@ void testForces() {
   core::System far = s;
   far.positions[1] = {2.0, 0.0, 0.0};
   std::vector<glm::dvec3> a_far;
-  core::computeAccelerations(far, a_far);
+  kSolar.accelerations(far, a_far);
   CHECK_MSG(nearly(glm::length(a[1]), 4.0 * glm::length(a_far[1]), 1e-12),
             describe(glm::length(a[1]), 4.0 * glm::length(a_far[1])));
 
   // Circular orbit condition: |a| = GM/r^2 = 4*pi^2 at r=1.
-  CHECK_MSG(nearly(glm::length(a[1]), core::kG, 1e-12),
-            describe(glm::length(a[1]), core::kG));
+  CHECK_MSG(nearly(glm::length(a[1]), core::solar::kG, 1e-12),
+            describe(glm::length(a[1]), core::solar::kG));
 }
 
 void testDiagnostics() {
@@ -114,8 +119,8 @@ void testDiagnostics() {
   s.masses = {1.0, 1.0};
 
   try {
-    CHECK_MSG(nearly(core::totalEnergy(s), 0.5 - core::kG, 1e-12),
-              describe(core::totalEnergy(s), 0.5 - core::kG));
+    CHECK_MSG(nearly(core::totalEnergy(s, kSolar), 0.5 - core::solar::kG, 1e-12),
+              describe(core::totalEnergy(s, kSolar), 0.5 - core::solar::kG));
   } catch (const std::logic_error& e) {
     skip(e.what());
   }
@@ -127,11 +132,11 @@ void testDiagnostics() {
   three.positions = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
   three.velocities = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
   three.masses = {1.0, 1.0, 1.0};
-  const double want = -core::kG * (1.0 + 1.0 + 1.0 / std::sqrt(2.0));
+  const double want = -core::solar::kG * (1.0 + 1.0 + 1.0 / std::sqrt(2.0));
 
   try {
-    CHECK_MSG(nearly(core::totalEnergy(three), want, 1e-12),
-              describe(core::totalEnergy(three), want));
+    CHECK_MSG(nearly(core::totalEnergy(three, kSolar), want, 1e-12),
+              describe(core::totalEnergy(three, kSolar), want));
   } catch (const std::logic_error& e) {
     skip(e.what());
   }
@@ -139,12 +144,12 @@ void testDiagnostics() {
   try {
     // A bound orbit has negative total energy.
     core::System earth = core::scenarios::sunEarth();
-    CHECK(core::totalEnergy(earth) < 0.0);
+    CHECK(core::totalEnergy(earth, kSolar) < 0.0);
 
     // And it must match the Python oracle exactly.
     const double python_value = -5.9276844032942678e-05;
-    CHECK_MSG(nearly(core::totalEnergy(earth), python_value, 1e-12),
-              describe(core::totalEnergy(earth), python_value));
+    CHECK_MSG(nearly(core::totalEnergy(earth, kSolar), python_value, 1e-12),
+              describe(core::totalEnergy(earth, kSolar), python_value));
   } catch (const std::logic_error& e) {
     skip(e.what());
   }
@@ -277,7 +282,7 @@ void testAgainstPythonReference() {
   std::size_t worst_step = 0;
   try {
     for (std::size_t step = 1; step < times.size(); ++step) {
-      core::step(s, dt, core::Method::Verlet);
+      core::step(s, dt, core::Method::Verlet, kSolar);
       const double error = glm::length(s.positions[1] - earth[step]);
       if (error > worst) {
         worst = error;
@@ -299,6 +304,277 @@ void testAgainstPythonReference() {
   CHECK_MSG(worst < 1e-12, detail);
 }
 
+// ---------------------------------------------------------------------------
+// Orbital elements
+// ---------------------------------------------------------------------------
+
+void testElements() {
+  std::printf("orbital elements\n");
+
+  try {
+    // Round trip: a known circular orbit should give back what built it.
+    const double altitude = 500.0;
+    const double inclination = 45.0;
+    core::System s = core::scenarios::circularOrbit(altitude, inclination);
+    const core::OrbitalElements el =
+        core::toElements(s.positions[0], s.velocities[0]);
+
+    const double expected_a = core::earth::kRadius + altitude;
+    CHECK_MSG(nearly(el.semi_major_axis, expected_a, 1e-9),
+              describe(el.semi_major_axis, expected_a));
+    CHECK_MSG(el.eccentricity < 1e-12, describe(el.eccentricity, 0.0));
+    CHECK_MSG(nearly(core::degrees(el.inclination), inclination, 1e-9),
+              describe(core::degrees(el.inclination), inclination));
+
+    // Molniya is built at the critical inclination with a 12-hour period.
+    core::System m = core::scenarios::molniya();
+    const core::OrbitalElements mel =
+        core::toElements(m.positions[0], m.velocities[0]);
+    CHECK_MSG(nearly(core::degrees(mel.inclination), 63.435, 1e-6),
+              describe(core::degrees(mel.inclination), 63.435));
+    CHECK_MSG(nearly(core::orbitalPeriod(mel.semi_major_axis), 12.0 * 3600.0, 1e-6),
+              describe(core::orbitalPeriod(mel.semi_major_axis), 12.0 * 3600.0));
+    // Started at perigee, so true anomaly is 0 (or 2pi).
+    const double anomaly = std::min(mel.true_anomaly,
+                                    2.0 * core::kPi - mel.true_anomaly);
+    CHECK_MSG(anomaly < 1e-9, describe(anomaly, 0.0));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // An orbit propagated with no perturbation keeps its elements: the shape
+    // and orientation are constants of the unperturbed two-body problem, so
+    // only the true anomaly may move.
+    const core::EarthOrbit two_body({/*j2=*/false});
+    core::System s = core::scenarios::iss();
+    const core::OrbitalElements before =
+        core::toElements(s.positions[0], s.velocities[0]);
+
+    if (integrate(s, 1.0, 20.0 * 5400.0, core::Method::RK4, two_body)) {
+      const core::OrbitalElements after =
+          core::toElements(s.positions[0], s.velocities[0]);
+
+      CHECK_MSG(nearly(after.semi_major_axis, before.semi_major_axis, 1e-9),
+                describe(after.semi_major_axis, before.semi_major_axis));
+      CHECK_MSG(nearly(after.inclination, before.inclination, 1e-9),
+                describe(core::degrees(after.inclination),
+                         core::degrees(before.inclination)));
+      CHECK_MSG(std::abs(after.raan - before.raan) < 1e-9,
+                describe(core::degrees(after.raan), core::degrees(before.raan)));
+    }
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// J2 perturbation
+//
+// These don't check the acceleration formula directly. They propagate an orbit
+// with J2 switched on, measure how fast the node actually moves, and compare
+// against the analytic secular rate. Two independent routes to the same number
+// agreeing is what makes both credible.
+// ---------------------------------------------------------------------------
+
+void testJ2() {
+  std::printf("J2 perturbation\n");
+
+  const core::EarthOrbit with_j2({/*j2=*/true});
+
+  try {
+    // The perturbation is small: at LEO, J2 contributes ~1e-3 of the central
+    // term. Much larger and it would be a different orbit, not a perturbation.
+    core::System s = core::scenarios::iss();
+    std::vector<glm::dvec3> a;
+    with_j2.accelerations(s, a);
+
+    const core::EarthOrbit two_body({/*j2=*/false});
+    std::vector<glm::dvec3> a0;
+    two_body.accelerations(s, a0);
+
+    const double ratio = glm::length(a[0] - a0[0]) / glm::length(a0[0]);
+    CHECK_MSG(ratio > 1e-4 && ratio < 1e-2, describe(ratio, 1e-3));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // An equatorial orbit sits in the bulge's plane of symmetry, so J2 pulls
+    // straight inward with no out-of-plane component.
+    core::System equatorial = core::scenarios::circularOrbit(500.0, 0.0);
+    const glm::dvec3 aj2 = with_j2.j2Acceleration(equatorial.positions[0]);
+    CHECK_MSG(std::abs(aj2.z) < 1e-15, describe(aj2.z, 0.0));
+
+    // Over the pole the term is purely along z, and points *outward*: the
+    // bulge's mass sits farther from a polar satellite than an equivalent
+    // sphere's would, so gravity there is weaker than the point-mass value.
+    // The correction is inward over the equator and outward over the poles.
+    const glm::dvec3 polar = with_j2.j2Acceleration({0.0, 0.0, 7000.0});
+    CHECK(std::abs(polar.x) < 1e-15 && std::abs(polar.y) < 1e-15);
+    CHECK(polar.z > 0.0);
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // The model must honour its Config rather than reaching for the global
+    // Earth constants. Nothing else here exercises this, because every other
+    // test uses the defaults -- where the two are indistinguishable.
+    const glm::dvec3 r{7000.0, 0.0, 3000.0};
+
+    core::EarthOrbit::Config doubled;
+    doubled.j2_coefficient = core::earth::kJ2 * 2.0;
+    const double base = glm::length(with_j2.j2Acceleration(r));
+    const double twice = glm::length(core::EarthOrbit(doubled).j2Acceleration(r));
+    CHECK_MSG(nearly(twice, 2.0 * base, 1e-12), describe(twice / base, 2.0));
+
+    // Same for mu: the J2 term scales linearly with it.
+    core::EarthOrbit::Config half_mu;
+    half_mu.mu = core::earth::kMu * 0.5;
+    const double halved = glm::length(core::EarthOrbit(half_mu).j2Acceleration(r));
+    CHECK_MSG(nearly(halved, 0.5 * base, 1e-12), describe(halved / base, 0.5));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // The headline test: propagate a sun-synchronous orbit for a day and check
+    // the node moved at the analytically predicted rate.
+    core::System s = core::scenarios::sunSynchronous();
+    const core::OrbitalElements start =
+        core::toElements(s.positions[0], s.velocities[0]);
+    const double predicted = core::nodalPrecessionRate(start);
+
+    const double duration = 86400.0;
+    if (integrate(s, 1.0, duration, core::Method::RK4, with_j2)) {
+      const core::OrbitalElements end =
+          core::toElements(s.positions[0], s.velocities[0]);
+
+      double measured = (end.raan - start.raan) / duration;
+      // Unwrap in case RAAN crossed the 0/2pi branch cut.
+      if (std::abs(measured) > core::kPi / duration) {
+        measured = (end.raan - start.raan - 2.0 * core::kPi) / duration;
+      }
+
+      char detail[192];
+      std::snprintf(detail, sizeof(detail),
+                    "nodal rate: measured %.6e rad/s, predicted %.6e rad/s "
+                    "(%.3f%% apart)",
+                    measured, predicted,
+                    100.0 * std::abs(measured - predicted) / std::abs(predicted));
+      std::printf("  nodal precession over 24h: %.4f deg/day measured, "
+                  "%.4f predicted (%.2f%% apart)\n",
+                  core::degrees(measured) * 86400.0,
+                  core::degrees(predicted) * 86400.0,
+                  100.0 * std::abs(measured - predicted) / std::abs(predicted));
+      // 1% -- first-order secular theory ignores short-period oscillations
+      // that don't average out exactly over a whole number of days.
+      CHECK_MSG(std::abs(measured - predicted) < 0.01 * std::abs(predicted), detail);
+    }
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // Sun-synchronous means the node precesses one full turn per year, which
+    // is what keeps the local solar time of each pass fixed. At 700 km the
+    // inclination that achieves it is a little over 98 degrees -- retrograde,
+    // which is why those launches fly slightly west of south.
+    const double a = core::earth::kRadius + 700.0;
+    const double i = core::degrees(core::sunSynchronousInclination(a));
+    CHECK_MSG(i > 98.0 && i < 98.5, describe(i, 98.2));
+
+    core::OrbitalElements el;
+    el.semi_major_axis = a;
+    el.eccentricity = 0.0;
+    el.inclination = core::radians(i);
+
+    const double rate = core::nodalPrecessionRate(el);
+    const double required = 2.0 * core::kPi / core::earth::kSiderealYear;
+    CHECK_MSG(nearly(rate, required, 1e-6), describe(rate, required));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // At the critical inclination the argument of perigee stops drifting,
+    // because 5cos^2(i) - 1 vanishes at i = 63.43 degrees.
+    core::OrbitalElements el;
+    el.semi_major_axis = 26600.0;
+    el.eccentricity = 0.74;
+    el.inclination = core::radians(63.435);
+
+    CHECK(std::abs(core::apsidalPrecessionRate(el)) < 1e-11);
+
+    // Away from it, perigee moves. Below the critical angle it advances.
+    el.inclination = core::radians(30.0);
+    CHECK(core::apsidalPrecessionRate(el) > 0.0);
+    el.inclination = core::radians(80.0);
+    CHECK(core::apsidalPrecessionRate(el) < 0.0);
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // A prograde orbit's node regresses (moves west); a retrograde one's
+    // advances. The sign is what makes sun-synchronous orbits need i > 90.
+    core::OrbitalElements prograde;
+    prograde.semi_major_axis = 7000.0;
+    prograde.inclination = core::radians(51.6);
+    CHECK(core::nodalPrecessionRate(prograde) < 0.0);
+
+    core::OrbitalElements retrograde = prograde;
+    retrograde.inclination = core::radians(120.0);
+    CHECK(core::nodalPrecessionRate(retrograde) > 0.0);
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ground track
+// ---------------------------------------------------------------------------
+
+void testGroundTrack() {
+  std::printf("ground track\n");
+
+  try {
+    // On the +x axis at t=0 the frames are aligned, so longitude is 0 and the
+    // point is on the equator.
+    const core::GroundPoint p =
+        core::toGroundPoint({core::earth::kRadius + 400.0, 0.0, 0.0}, 0.0);
+    CHECK_MSG(std::abs(p.latitude) < 1e-9, describe(p.latitude, 0.0));
+    CHECK_MSG(std::abs(p.longitude) < 1e-9, describe(p.longitude, 0.0));
+    CHECK_MSG(nearly(p.altitude, 400.0, 1e-9), describe(p.altitude, 400.0));
+
+    // Straight over the north pole.
+    const core::GroundPoint pole = core::toGroundPoint({0.0, 0.0, 7000.0}, 0.0);
+    CHECK_MSG(nearly(pole.latitude, 90.0, 1e-9), describe(pole.latitude, 90.0));
+
+    // Latitude can never exceed the inclination.
+    core::System s = core::scenarios::iss();
+    const core::EarthOrbit model;
+    double worst = 0.0;
+    double out_of_range = 0.0;
+    const double dt = 10.0;
+    for (int step = 0; step < 1000; ++step) {
+      core::step(s, dt, core::Method::RK4, model);
+      const core::GroundPoint g = core::toGroundPoint(s.positions[0], step * dt);
+      worst = std::max(worst, std::abs(g.latitude));
+      if (g.longitude < -180.0 || g.longitude > 180.0) {
+        out_of_range = g.longitude;
+      }
+    }
+    // One check for the whole sweep rather than a thousand.
+    CHECK_MSG(out_of_range == 0.0, describe(out_of_range, 0.0));
+    CHECK_MSG(worst < 52.0, describe(worst, 51.6));
+    CHECK_MSG(worst > 50.0, describe(worst, 51.6));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -309,6 +585,9 @@ int main() {
   testConvergenceOrder();
   testOrbitStability();
   testAgainstPythonReference();
+  testElements();
+  testJ2();
+  testGroundTrack();
 
   std::printf("\n%d checks, %d failed, %d skipped\n", g_checks, g_failures, g_skips);
   if (g_skips > 0) {

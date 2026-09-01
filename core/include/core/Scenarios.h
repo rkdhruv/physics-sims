@@ -19,5 +19,22 @@ System testParticle();
 // Eccentric orbit, e ~ 0.36, a ~ 0.735 AU, period ~ 0.630 yr.
 System eccentric();
 
+// --- Geocentric, km and seconds. Masses are 1.0 so the energy diagnostic
+// --- reports specific energy (per unit satellite mass).
+
+// Circular orbit at the given altitude and inclination.
+System circularOrbit(double altitude_km, double inclination_deg);
+
+// ISS-like: 420 km circular, 51.6 degrees.
+System iss();
+
+// Sun-synchronous at 700 km, at the inclination that makes the node precess
+// once per year (a little over 98 degrees).
+System sunSynchronous();
+
+// Molniya: highly eccentric, 12-hour period, at the 63.4-degree critical
+// inclination where the argument of perigee stops drifting.
+System molniya();
+
 }  // namespace scenarios
 }  // namespace core
