@@ -16,7 +16,8 @@ else is required. See `vendor/README.md` if you ever need to regenerate it.
 cmake -S . -B build
 cmake --build build -j8
 
-./build/orbital        # the scene
+./build/orbital        # integrator comparison, heliocentric
+./build/satellite      # Earth orbits with J2 and a ground track
 ./build/core_tests     # the engine test suite
 ```
 
@@ -25,22 +26,58 @@ source file is added. Day to day, `cmake --build build` is enough.
 
 ## Controls
 
+Shared by both scenes:
+
 | | |
 |---|---|
 | left drag | orbit the camera |
 | right drag | pan |
 | scroll | zoom |
 | `space` | pause |
-| `1` `2` `3` | Euler / Verlet / RK4 |
 | `[` `]` | slow down / speed up |
-| `R` | reload shaders from disk |
 | `C` | clear trails |
+| `R` | reload shaders from disk |
+| `P` | screenshot (writes a `.ppm` next to the binary) |
 | `esc` | quit |
 
-`R` is the one worth knowing about: shaders are read from `render/shaders/` at
-runtime, so you can edit a `.frag`, press R, and see the change without a
-rebuild. That turns a ~20-second edit loop into an instant one, which matters a
-lot while you're learning GLSL.
+Scene-specific:
+
+| | |
+|---|---|
+| `1` `2` `3` in `orbital` | Euler / Verlet / RK4 |
+| `1` `2` `3` in `satellite` | ISS / sun-synchronous / Molniya |
+| `J` in `satellite` | toggle the J2 perturbation |
+
+`R` reloads shaders from `render/shaders/` at runtime, so a `.frag` can be
+edited and seen without a rebuild.
+
+`J` is the demonstration worth running: the title bar reports `dRAAN`, the
+drift of the orbital plane since the run started. With J2 off it stays pinned
+at zero. With it on, ISS drifts about −4.97 °/day and the sun-synchronous orbit
+about +0.99 °/day — one full turn per year, which is the entire point of that
+orbit.
+
+Note that the large westward shift between successive ground-track passes is
+Earth's rotation (~22.5° per 90-minute orbit), not J2. The perturbation is the
+slow additional drift on top, and the `dRAAN` readout is where it's legible.
+
+## Screenshots
+
+`P` writes the framebuffer to a binary PPM — no image library needed in the
+renderer. Convert with:
+
+```bash
+./venv/bin/python tools/ppm2png.py satellite-1234.ppm docs/molniya.png --trim
+```
+
+`--trim` crops the uniform background from the edges, which orbit captures tend
+to have a lot of, and the output is downscaled to 1600 px wide. A Retina
+framebuffer is ~3400 px across — several megabytes of PNG for no visible gain at
+the width GitHub renders at.
+
+Capture a handful of orbits rather than a long run. The scenes keep six orbits
+of history by default; leaving one running for minutes fills the ground-track
+panel with an unreadable mesh. `C` clears the trails if a run has gone too far.
 
 ## Sanitizer build
 
