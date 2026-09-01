@@ -49,6 +49,10 @@ class Window {
 
   double time() const;
 
+  // Write the framebuffer to a binary PPM. Chosen over PNG so the renderer
+  // needs no image library; convert with Pillow (see BUILDING.md).
+  bool saveScreenshot(const std::string& path) const;
+
  private:
   GLFWwindow* window_ = nullptr;
 

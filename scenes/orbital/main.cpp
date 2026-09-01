@@ -3,9 +3,9 @@
 // Controls:
 //   left drag      orbit the camera        scroll    zoom
 //   right drag     pan                     space     pause
-//   1 / 2 / 3      Euler / Verlet / RK4    R         reload shaders
-//   [ / ]          slow down / speed up    C         clear trails
-//   esc            quit
+//   1 / 2 / 3      Euler / Verlet / RK4    C         clear trails
+//   [ / ]          slow down / speed up    R         reload shaders
+//   P              screenshot              esc       quit
 
 #include <cstdio>
 #include <deque>
@@ -18,6 +18,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "core/Diagnostics.h"
+#include "core/ForceModel.h"
 #include "core/Integrator.h"
 #include "core/Scenarios.h"
 #include "core/System.h"
@@ -28,12 +29,13 @@
 namespace {
 
 constexpr int kMaxTrailPoints = 40000;
+const core::NBodyGravity kGravity(core::solar::kG);
 constexpr double kDt = 1.0 / 365.25;  // one day, in years
 
 // Matching the palette the Python figures use.
 constexpr glm::vec4 kSunColor{0.929f, 0.631f, 0.0f, 1.0f};
 constexpr glm::vec4 kBodyColor{0.165f, 0.471f, 0.839f, 1.0f};
-constexpr glm::vec4 kTrailColor{0.165f, 0.471f, 0.839f, 0.55f};
+constexpr glm::vec4 kTrailColor{0.290f, 0.580f, 0.900f, 0.90f};
 
 // A GPU buffer that a std::vector of points gets streamed into every frame.
 class PointBuffer {
@@ -101,6 +103,7 @@ int main() {
     PointBuffer body_buffer;
 
     bool paused = false;
+    bool screenshot_requested = false;
     int steps_per_frame = 4;
     double sim_time = 0.0;
     double last_title_update = 0.0;
@@ -114,6 +117,7 @@ int main() {
       if (window.keyPressed(GLFW_KEY_R)) {
         std::printf(shader.reload() ? "[shader] reloaded\n" : "[shader] reload failed\n");
       }
+      if (window.keyPressed(GLFW_KEY_P)) screenshot_requested = true;
       if (window.keyPressed(GLFW_KEY_LEFT_BRACKET)) {
         steps_per_frame = std::max(1, steps_per_frame / 2);
       }
@@ -147,7 +151,7 @@ int main() {
       if (!paused) {
         try {
           for (int i = 0; i < steps_per_frame; ++i) {
-            core::step(system, kDt, method);
+            core::step(system, kDt, method, kGravity);
             sim_time += kDt;
           }
         } catch (const std::logic_error& e) {
@@ -193,16 +197,30 @@ int main() {
       // --- title bar readout ---------------------------------------------
       if (window.time() - last_title_update > 0.25) {
         last_title_update = window.time();
-        std::string energy = "energy n/a (write totalEnergy)";
+        std::string energy = "energy n/a";
         try {
           char buffer[64];
-          std::snprintf(buffer, sizeof(buffer), "E = %.9e", core::totalEnergy(system));
+          std::snprintf(buffer, sizeof(buffer), "E = %.9e", core::totalEnergy(system, kGravity));
           energy = buffer;
         } catch (const std::logic_error&) {
         }
         window.setTitle("physics-sims | orbital | " + std::string(core::methodName(method)) +
                         " | t = " + std::to_string(static_cast<int>(sim_time)) + " yr | " +
                         energy + (paused ? " | PAUSED" : ""));
+      }
+
+      // Captured here rather than in the input block: beginFrame() clears the
+      // framebuffer, so reading it before the scene is drawn returns nothing
+      // but the clear colour. glReadPixels also has to come before the swap,
+      // since the back buffer's contents are undefined afterwards.
+      if (screenshot_requested) {
+        screenshot_requested = false;
+        const std::string path = std::string("orbital-") +
+                                 std::to_string(static_cast<long>(window.time() * 1000)) +
+                                 ".ppm";
+        std::printf(window.saveScreenshot(path) ? "[shot] wrote %s\n"
+                                                : "[shot] failed: %s\n",
+                    path.c_str());
       }
 
       window.endFrame();

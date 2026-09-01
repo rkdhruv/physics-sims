@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <stdexcept>
+#include <vector>
 
 #include <glad/gl.h>
 // glad must come before glfw3.h, or GLFW pulls in the system GL headers and the
@@ -125,6 +126,29 @@ bool Window::mouseDown(int button) const {
 }
 
 double Window::time() const { return glfwGetTime(); }
+
+bool Window::saveScreenshot(const std::string& path) const {
+  const glm::ivec2 size = framebufferSize();
+  std::vector<unsigned char> pixels(static_cast<std::size_t>(size.x) * size.y * 3);
+
+  // Rows are tightly packed here; the default 4-byte alignment would pad each
+  // row of an odd-width framebuffer and skew the image.
+  glPixelStorei(GL_PACK_ALIGNMENT, 1);
+  glReadPixels(0, 0, size.x, size.y, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+
+  std::FILE* file = std::fopen(path.c_str(), "wb");
+  if (!file) return false;
+  std::fprintf(file, "P6\n%d %d\n255\n", size.x, size.y);
+
+  // OpenGL's origin is bottom-left and PPM's is top-left, so write the rows
+  // back to front.
+  for (int y = size.y - 1; y >= 0; --y) {
+    std::fwrite(pixels.data() + static_cast<std::size_t>(y) * size.x * 3, 1,
+                static_cast<std::size_t>(size.x) * 3, file);
+  }
+  std::fclose(file);
+  return true;
+}
 
 void Window::scrollCallback(GLFWwindow* w, double, double yoff) {
   auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));

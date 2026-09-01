@@ -2,6 +2,7 @@
 build/
 build-*/
 cmake-build-*/
+*.ppm
 compile_commands.json
 *.o
 *.a

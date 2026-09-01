@@ -41,7 +41,18 @@ void Camera::pan(float dx_pixels, float dy_pixels) {
 }
 
 void Camera::setDistance(float d) {
-  distance_ = std::clamp(d, 0.02f, 500.0f);
+  distance_ = std::clamp(d, min_distance_, max_distance_);
+}
+
+void Camera::setDistanceRange(float min_distance, float max_distance) {
+  min_distance_ = min_distance;
+  max_distance_ = max_distance;
+  setDistance(distance_);
+}
+
+void Camera::setClipPlanes(float near_plane, float far_plane) {
+  near_ = near_plane;
+  far_ = far_plane;
 }
 
 glm::vec3 Camera::position() const {

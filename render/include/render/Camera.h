@@ -29,6 +29,12 @@ class Camera {
   void setTarget(const glm::vec3& t) { target_ = t; }
   void setDistance(float d);
 
+  // Scenes work in different unit systems -- AU for the solar scene,
+  // kilometres for the satellite one -- so the usable distance range and the
+  // clip planes can't be fixed here. Defaults suit an AU-scale scene.
+  void setDistanceRange(float min_distance, float max_distance);
+  void setClipPlanes(float near_plane, float far_plane);
+
  private:
   glm::vec3 target_{0.0f};
   float distance_ = 3.0f;   // AU
@@ -38,6 +44,8 @@ class Camera {
   float fov_ = 45.0f;       // degrees
   float near_ = 0.01f;
   float far_ = 1000.0f;
+  float min_distance_ = 0.02f;
+  float max_distance_ = 500.0f;
 
   static constexpr float kOrbitSpeed = 0.006f;
   static constexpr float kPanSpeed = 0.0015f;
