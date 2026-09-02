@@ -1,5 +1,7 @@
 # physics-sims
 
+[![CI](https://github.com/rkdhruv/physics-sims/actions/workflows/ci.yml/badge.svg)](https://github.com/rkdhruv/physics-sims/actions/workflows/ci.yml)
+
 A gravitational simulation engine written from scratch in C++17 — numerical
 integrators validated against conservation laws, satellite orbits with the J2
 oblateness perturbation, and a real-time OpenGL renderer, cross-checked against

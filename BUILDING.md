@@ -24,6 +24,19 @@ cmake --build build -j8
 `cmake -S . -B build` only needs re-running when `CMakeLists.txt` changes or a
 source file is added. Day to day, `cmake --build build` is enough.
 
+## Building without graphics
+
+`core/` links no graphics libraries, so the engine and its test suite build on a
+machine with no GPU, no display and no GLFW — only a compiler and glm:
+
+```bash
+cmake -S . -B build -DBUILD_SCENES=OFF
+cmake --build build -j8 && ./build/core_tests
+```
+
+This is what CI runs. It's also the fastest way to iterate on the physics, since
+it skips the renderer entirely.
+
 ## Controls
 
 Shared by both scenes:

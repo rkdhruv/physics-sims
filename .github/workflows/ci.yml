@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The engine and both test suites, on a machine with no GPU and no display.
+  # core/ links no graphics libraries, so this needs nothing but a compiler,
+  # a header-only math library, and Python.
+  engine:
+    name: engine & tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install glm (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libglm-dev
+
+      - name: Install glm (macOS)
+        if: runner.os == 'macOS'
+        run: brew install glm
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_SCENES=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: C++ tests
+        run: ./build/core_tests
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install numpy matplotlib pytest
+
+      - name: Python tests
+        run: pytest -q
+
+      # Keeps the cross-validation honest: if the Python physics ever changes,
+      # the committed reference data must be regenerated, or the C++ suite is
+      # silently checking itself against stale numbers.
+      - name: Reference data is up to date
+        run: python -m validation.export_reference --check
+
+  # The full build including the renderer. Compiled but not run -- the scenes
+  # need a display, and what CI is checking here is that the graphics code
+  # still compiles and links on a clean machine.
+  scenes:
+    name: scenes build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install graphics dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglm-dev libglfw3-dev libgl1-mesa-dev xorg-dev
+
+      - name: Install graphics dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install glm glfw
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build everything
+        run: cmake --build build -j
+
+  # AddressSanitizer catches out-of-bounds and use-after-free; UBSan catches
+  # signed overflow, bad shifts and null dereferences. Both found real bugs
+  # during development, so they run on every push.
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install glm
+        run: sudo apt-get update && sudo apt-get install -y libglm-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-asan -DBUILD_SCENES=OFF -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-asan -j
+
+      - name: Run under sanitizers
+        run: ./build-asan/core_tests
