@@ -106,3 +106,6 @@ target_link_libraries(orbital PRIVATE core render)
 
 add_executable(satellite scenes/satellite/main.cpp)
 target_link_libraries(satellite PRIVATE core render)
+
+add_executable(cluster scenes/cluster/main.cpp)
+target_link_libraries(cluster PRIVATE core render)
