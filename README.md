@@ -4,13 +4,13 @@
 
 A gravitational simulation engine written from scratch in C++17 — numerical
 integrators validated against conservation laws, satellite orbits with the J2
-oblateness perturbation, and a real-time OpenGL renderer, cross-checked against
-an independent Python implementation.
+oblateness perturbation, a Barnes-Hut tree solver, and a real-time OpenGL
+renderer, cross-checked against an independent Python implementation.
 
 ![Energy conservation over 100 years](figures/energy_drift.png)
 
-> **Status:** in active development. Two scenes run on the shared engine; the
-> N-body and black-hole scenes are next. See [Scenes](#scenes).
+> **Status:** in active development. Three scenes run on the shared engine; a
+> black-hole scene is next. See [Scenes](#scenes).
 
 ---
 
@@ -33,6 +33,7 @@ convergence, an analytic rate, or a second implementation.
 | The integrators are the order they claim | Slope of log(error) vs log(dt) | 0.98 / 2.00 / 4.10 vs. theoretical 1 / 2 / 4 |
 | The C++ engine matches the Python one | Same scenario, same timestep, 730 steps | agree to **7.4e-14 AU** |
 | J2 perturbs orbits correctly | Propagated nodal precession vs. analytic secular rate | **0.06%** apart |
+| The Barnes-Hut tree is correct | At θ=0 it must reduce to exact pairwise summation | agree to **8.6e-16** |
 | Sun-synchronous orbits fall out of the physics | Inclination that precesses once per year | **98.2°**, derived not assumed |
 
 That last one is the point of the whole exercise. A sun-synchronous orbit holds
@@ -48,7 +49,8 @@ One engine, several scenes — not several unrelated demos.
 ```
 core/          integrators, force models, orbital elements   (no OpenGL)
 render/        window, shaders, camera, buffers              (no physics)
-scenes/        orbital (heliocentric) and satellite (Earth)
+scenes/        orbital, satellite and cluster
+benchmarks/    solver timing harness
 validation/    Python harness — integrator comparison, energy plots
 tests/         pytest suite + a dependency-free C++ suite
 vendor/        glad (generated GL loader)
@@ -57,14 +59,14 @@ archive/       the original Python prototype this grew out of
 
 `core/` links no graphics libraries, which keeps the physics testable without
 opening a window. Physics enters through a `ForceModel` interface, so the same
-integrators drive heliocentric N-body gravity and Earth-orbit-with-J2 without
-knowing the difference — swapping the model is a one-line change at the call
-site.
+integrators drive heliocentric N-body gravity, Earth-orbit-with-J2 and a
+Barnes-Hut tree without knowing the difference — swapping the model is a
+one-line change at the call site.
 
 ## Scenes
 
-Both run on the same engine and the same renderer — the physics differs only by
-which `ForceModel` is passed to the integrator.
+All three run on the same engine and the same renderer — the physics differs
+only by which `ForceModel` is passed to the integrator.
 
 ### `satellite` — Earth orbits with J2
 
@@ -88,6 +90,33 @@ Press `1`/`2`/`3` for ISS, sun-synchronous, and Molniya; `J` toggles the
 perturbation, and the title bar reports the orbital plane's drift since the run
 started.
 
+### `cluster` — N-body with a Barnes-Hut tree
+
+A self-gravitating Plummer sphere, started in virial equilibrium so it neither
+collapses nor disperses. `1` and `2` switch between exact O(n²) summation and
+the tree at runtime, with milliseconds per step in the title bar — at 4096
+bodies that is ~118 ms against ~31 ms.
+
+Clusters are not decoration here: the N-body problem has no closed form past two
+bodies, and Barnes and Hut published the tree algorithm in 1986 for exactly this
+workload. It is the problem the data structure was designed for, which makes it
+the honest thing to benchmark against.
+
+![N-body solver scaling](figures/nbody_scaling.png)
+
+Direct summation measures **n^1.99** — textbook O(n²). Barnes-Hut measures
+**n^1.61** over the same range, crossing over at ~512 bodies and running 4.3×
+faster at 16,384 for 0.3% force error.
+
+That exponent is short of the n log n the algorithm promises, and the cause is
+the workload rather than the implementation. Tree construction is under 1% of
+the runtime and time per node visit is flat, but nodes visited per body grow as
+~n^0.35 instead of log n. Barnes-Hut's bound assumes roughly uniform density,
+and a Plummer sphere is strongly centrally concentrated: a body in the dense
+core has many neighbours close enough to fail the opening criterion. The
+asymptotic bound is a claim about the input as much as the algorithm.
+[`benchmarks/README.md`](benchmarks/README.md) has the measurements.
+
 ### `orbital` — integrator comparison
 
 ![Explicit Euler spiralling outward](docs/euler-spiral.png)
@@ -97,8 +126,7 @@ retrace the last one exactly; instead the orbit gains energy every step and
 spirals outward. Press `2` or `3` to switch to velocity Verlet or RK4, where the
 loops collapse onto a single line.
 
-Planned: an N-body cluster (Barnes-Hut, 10k+ bodies, instanced rendering) and a
-black hole (geodesic raytracing in a fragment shader).
+Planned: a black hole scene (geodesic raytracing in a fragment shader).
 
 ## Numerical methods
 
@@ -161,7 +189,9 @@ brew install cmake glfw glm
 cmake -S . -B build && cmake --build build -j8
 ./build/orbital        # integrator comparison, heliocentric
 ./build/satellite      # Earth orbits with J2 and a ground track
-./build/core_tests     # 49 checks
+./build/cluster        # N-body cluster, solver switchable at runtime
+./build/core_tests     # 58 checks
+./build/nbody_bench    # solver timing, writes CSV
 ```
 
 Full controls and a sanitizer-build recipe are in [`BUILDING.md`](BUILDING.md).

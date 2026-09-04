@@ -18,7 +18,9 @@ cmake --build build -j8
 
 ./build/orbital        # integrator comparison, heliocentric
 ./build/satellite      # Earth orbits with J2 and a ground track
+./build/cluster        # N-body cluster, solver switchable at runtime
 ./build/core_tests     # the engine test suite
+./build/nbody_bench    # solver timing (see benchmarks/)
 ```
 
 `cmake -S . -B build` only needs re-running when `CMakeLists.txt` changes or a
@@ -39,7 +41,7 @@ it skips the renderer entirely.
 
 ## Controls
 
-Shared by both scenes:
+Shared by all three scenes:
 
 | | |
 |---|---|
@@ -47,8 +49,6 @@ Shared by both scenes:
 | right drag | pan |
 | scroll | zoom |
 | `space` | pause |
-| `[` `]` | slow down / speed up |
-| `C` | clear trails |
 | `R` | reload shaders from disk |
 | `P` | screenshot (writes a `.ppm` next to the binary) |
 | `esc` | quit |
@@ -60,6 +60,12 @@ Scene-specific:
 | `1` `2` `3` in `orbital` | Euler / Verlet / RK4 |
 | `1` `2` `3` in `satellite` | ISS / sun-synchronous / Molniya |
 | `J` in `satellite` | toggle the J2 perturbation |
+| `[` `]` `C` in `orbital`, `satellite` | slow down / speed up / clear trails |
+| `1` `2` in `cluster` | direct summation / Barnes-Hut |
+| `[` `]` in `cluster` | halve / double the body count |
+| `-` `=` in `cluster` | opening angle θ down / up |
+| `,` `.` in `cluster` | point size |
+| `C` in `cluster` | restart |
 
 `R` reloads shaders from `render/shaders/` at runtime, so a `.frag` can be
 edited and seen without a rebuild.
@@ -73,6 +79,12 @@ orbit.
 Note that the large westward shift between successive ground-track passes is
 Earth's rotation (~22.5° per 90-minute orbit), not J2. The perturbation is the
 slow additional drift on top, and the `dRAAN` readout is where it's legible.
+
+In `cluster`, `1` and `2` are the comparison worth running: the title bar reports
+milliseconds per step, so switching solvers shows the speedup directly. At 4096
+bodies direct summation is ~118 ms/step against the tree's ~31 ms. Larger body
+counts cost frame rate — 8192 runs at ~13 fps with θ=0.7, and raising θ trades
+accuracy for speed.
 
 ## Screenshots
 
