@@ -37,10 +37,14 @@ class ForceModel {
 
 // Mutual gravitation between every pair of bodies, O(n^2).
 //
-//   a_i = sum_{j != i} G * m_j * (r_j - r_i) / |r_j - r_i|^3
+//   a_i = sum_{j != i} G * m_j * (r_j - r_i) / (|r_j - r_i|^2 + eps^2)^(3/2)
+//
+// `softening` (eps) bounds the force at short range: without it a close
+// encounter produces an acceleration no fixed timestep can integrate. Defaults
+// to zero, which is the classical form.
 class NBodyGravity : public ForceModel {
  public:
-  explicit NBodyGravity(double G);
+  explicit NBodyGravity(double G, double softening = 0.0);
 
   // Declaring the 3-argument override would otherwise hide the base class's
   // System overload -- C++ name lookup stops at the first scope with a match,
@@ -54,8 +58,12 @@ class NBodyGravity : public ForceModel {
   double potentialEnergy(const std::vector<glm::dvec3>& positions,
                          const std::vector<double>& masses) const override;
 
+  double G() const { return G_; }
+  double softening() const { return softening_; }
+
  private:
   double G_;
+  double softening_;
 };
 
 // Satellites around a central body fixed at the origin, in km and seconds.

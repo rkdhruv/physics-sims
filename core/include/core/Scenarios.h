@@ -36,5 +36,17 @@ System sunSynchronous();
 // inclination where the argument of perigee stops drifting.
 System molniya();
 
+// --- N-body units: G = 1, total mass = 1, Plummer scale radius = 1.
+
+// A self-gravitating cluster of `count` equal-mass bodies, with positions
+// following a Plummer profile and velocities scaled to virial equilibrium
+// (2T + U = 0) so it neither collapses nor disperses.
+//
+// Deterministic for a given seed.
+System cluster(std::size_t count, unsigned seed = 42, double softening = 0.05);
+
+// Must also be passed to the force model, or the energies won't match.
+constexpr double kClusterSoftening = 0.05;
+
 }  // namespace scenarios
 }  // namespace core

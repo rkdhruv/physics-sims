@@ -16,6 +16,7 @@
 
 #include <glm/geometric.hpp>
 
+#include "core/BarnesHut.h"
 #include "core/Diagnostics.h"
 #include "core/Elements.h"
 #include "core/ForceModel.h"
@@ -575,6 +576,151 @@ void testGroundTrack() {
   }
 }
 
+// Barnes-Hut, checked against the exact O(n^2) solver: at theta = 0 the tree
+// never approximates, so the two must agree to rounding.
+void testBarnesHut() {
+  std::printf("Barnes-Hut\n");
+
+  const double softening = core::scenarios::kClusterSoftening;
+  const core::NBodyGravity exact(1.0, softening);
+
+  core::System s = core::scenarios::cluster(512);
+  std::vector<glm::dvec3> reference;
+  exact.accelerations(s, reference);
+
+  // Force error normalised by the system's RMS acceleration. Dividing each
+  // particle's error by its own acceleration instead would be dominated by
+  // core particles, whose forces nearly cancel.
+  auto forceError = [&](double theta) {
+    const core::BarnesHutGravity tree(1.0, theta, softening);
+    std::vector<glm::dvec3> approx;
+    tree.accelerations(s, approx);
+
+    double error_sq = 0.0, reference_sq = 0.0;
+    for (std::size_t i = 0; i < reference.size(); ++i) {
+      const glm::dvec3 d = approx[i] - reference[i];
+      error_sq += glm::dot(d, d);
+      reference_sq += glm::dot(reference[i], reference[i]);
+    }
+    return reference_sq > 0.0 ? std::sqrt(error_sq / reference_sq) : 0.0;
+  };
+
+  try {
+    // Exact pairwise summation by a different route. Not bit-identical: the
+    // sum runs in a different order and addition isn't associative.
+    const double exact_error = forceError(0.0);
+    char detail[160];
+    std::snprintf(detail, sizeof(detail),
+                  "theta=0 must reproduce direct summation: force error %.3e",
+                  exact_error);
+    CHECK_MSG(exact_error < 1e-12, detail);
+    std::printf("  theta=0 vs direct summation: %.3e force error\n", exact_error);
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // Accuracy degrades monotonically as the opening angle grows, and 0.5 --
+    // the conventional default -- should still be within about a percent.
+    const double e02 = forceError(0.2);
+    const double e05 = forceError(0.5);
+    const double e10 = forceError(1.0);
+
+    std::printf("  error vs theta: 0.2 -> %.2e, 0.5 -> %.2e, 1.0 -> %.2e\n",
+                e02, e05, e10);
+
+    CHECK(e02 < e05);
+    CHECK(e05 < e10);
+    CHECK_MSG(e05 < 1e-2, describe(e05, 1e-2));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // The root must hold every body, which catches bodies dropped during
+    // insertion -- otherwise visible only as a slightly wrong force.
+    const core::BarnesHutGravity tree(1.0, 0.5, softening);
+    std::vector<glm::dvec3> ignored;
+    tree.accelerations(s, ignored);
+
+    const core::OctreeNode& root = tree.tree().nodes().at(0);
+
+    double total_mass = 0.0;
+    glm::dvec3 com(0.0);
+    for (std::size_t i = 0; i < s.size(); ++i) {
+      total_mass += s.masses[i];
+      com += s.masses[i] * s.positions[i];
+    }
+    com /= total_mass;
+
+    CHECK_MSG(nearly(root.mass, total_mass, 1e-12), describe(root.mass, total_mass));
+    CHECK_MSG(glm::length(root.com - com) < 1e-12,
+              describe(glm::length(root.com - com), 0.0));
+
+    // O(n) nodes; far more means cells subdividing without separating anything.
+    const std::size_t nodes = tree.tree().nodeCount();
+    char detail[128];
+    std::snprintf(detail, sizeof(detail), "%zu nodes for %zu bodies, depth %d",
+                  nodes, s.size(), tree.tree().depth());
+    CHECK_MSG(nodes >= s.size() / 8 && nodes < 20 * s.size(), detail);
+    std::printf("  %zu bodies -> %zu nodes, depth %d\n", s.size(), nodes,
+                tree.tree().depth());
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // Node count against n. Counted rather than timed, so it stays
+    // deterministic -- wall-clock assertions belong in the benchmark.
+    const core::BarnesHutGravity tree(1.0, 0.5, softening);
+    std::vector<double> log_n, log_nodes;
+
+    for (std::size_t n : {256u, 512u, 1024u, 2048u}) {
+      core::System c = core::scenarios::cluster(n);
+      std::vector<glm::dvec3> out;
+      tree.accelerations(c, out);
+      log_n.push_back(std::log(static_cast<double>(n)));
+      log_nodes.push_back(std::log(static_cast<double>(tree.tree().nodeCount())));
+    }
+
+    double sx = 0, sy = 0, sxx = 0, sxy = 0;
+    const std::size_t k = log_n.size();
+    for (std::size_t i = 0; i < k; ++i) {
+      sx += log_n[i];
+      sy += log_nodes[i];
+      sxx += log_n[i] * log_n[i];
+      sxy += log_n[i] * log_nodes[i];
+    }
+    const double slope = (k * sxy - sx * sy) / (k * sxx - sx * sx);
+
+    char detail[128];
+    std::snprintf(detail, sizeof(detail),
+                  "node count should scale ~linearly with n, measured n^%.2f",
+                  slope);
+    CHECK_MSG(std::abs(slope - 1.0) < 0.2, detail);
+    std::printf("  node count scales as n^%.2f\n", slope);
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  try {
+    // A virialised cluster starts with 2T + U = 0.
+    core::System c = core::scenarios::cluster(256);
+    const core::BarnesHutGravity tree(1.0, 0.5, softening);
+
+    double kinetic = 0.0;
+    for (std::size_t i = 0; i < c.size(); ++i) {
+      kinetic += 0.5 * c.masses[i] * glm::dot(c.velocities[i], c.velocities[i]);
+    }
+    const double potential = tree.potentialEnergy(c.positions, c.masses);
+
+    CHECK_MSG(std::abs(2.0 * kinetic + potential) < 1e-9,
+              describe(2.0 * kinetic + potential, 0.0));
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -588,6 +734,7 @@ int main() {
   testElements();
   testJ2();
   testGroundTrack();
+  testBarnesHut();
 
   std::printf("\n%d checks, %d failed, %d skipped\n", g_checks, g_failures, g_skips);
   if (g_skips > 0) {

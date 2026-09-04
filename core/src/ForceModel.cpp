@@ -11,7 +11,8 @@ namespace core {
 // NBodyGravity
 // ---------------------------------------------------------------------------
 
-NBodyGravity::NBodyGravity(double G) : G_(G) {}
+NBodyGravity::NBodyGravity(double G, double softening)
+    : G_(G), softening_(softening) {}
 
 void NBodyGravity::accelerations(const std::vector<glm::dvec3>& positions,
                                  const std::vector<double>& masses,
@@ -19,12 +20,14 @@ void NBodyGravity::accelerations(const std::vector<glm::dvec3>& positions,
   const std::size_t n = masses.size();
   out.assign(n, glm::dvec3(0.0));
 
+  const double eps2 = softening_ * softening_;
+
   for (std::size_t i = 0; i < n; ++i) {
     for (std::size_t j = 0; j < n; ++j) {
       if (i == j) continue;
 
       const glm::dvec3 d = positions[j] - positions[i];
-      const double r2 = glm::dot(d, d);  // dot, not length: avoids a sqrt
+      const double r2 = glm::dot(d, d) + eps2;  // dot, not length: avoids a sqrt
       const double inv_r3 = 1.0 / (r2 * std::sqrt(r2));
 
       out[i] += G_ * masses[j] * d * inv_r3;
@@ -35,10 +38,13 @@ void NBodyGravity::accelerations(const std::vector<glm::dvec3>& positions,
 double NBodyGravity::potentialEnergy(const std::vector<glm::dvec3>& positions,
                                      const std::vector<double>& masses) const {
   const std::size_t n = masses.size();
+  const double eps2 = softening_ * softening_;
+
   double pe = 0.0;
   for (std::size_t i = 0; i < n; ++i) {
     for (std::size_t j = i + 1; j < n; ++j) {  // unique pairs only
-      pe -= G_ * masses[i] * masses[j] / glm::length(positions[i] - positions[j]);
+      const glm::dvec3 d = positions[i] - positions[j];
+      pe -= G_ * masses[i] * masses[j] / std::sqrt(glm::dot(d, d) + eps2);
     }
   }
   return pe;

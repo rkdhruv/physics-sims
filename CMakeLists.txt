@@ -39,6 +39,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(core STATIC
   core/src/ForceModel.cpp
+  core/src/BarnesHut.cpp
   core/src/Integrator.cpp
   core/src/Diagnostics.cpp
   core/src/Elements.cpp
@@ -57,6 +58,11 @@ target_compile_definitions(core_tests PRIVATE
 
 enable_testing()
 add_test(NAME core_tests COMMAND core_tests)
+
+# Benchmarks. No graphics either, so this builds alongside the tests -- but it
+# is never run as part of them: timing assertions belong nowhere near CI.
+add_executable(nbody_bench benchmarks/nbody_bench.cpp)
+target_link_libraries(nbody_bench PRIVATE core)
 
 if(NOT BUILD_SCENES)
   message(STATUS "BUILD_SCENES=OFF -- engine and tests only, no graphics")
