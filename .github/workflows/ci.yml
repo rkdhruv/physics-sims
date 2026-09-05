@@ -108,3 +108,27 @@ jobs:
 
       - name: Run under sanitizers
         run: ./build-asan/core_tests
+
+  # ThreadSanitizer is a separate job because it cannot be combined with ASan.
+  # It is what verifies the parallel force loop has no races.
+  thread-sanitizer:
+    name: ThreadSanitizer
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install glm
+        run: sudo apt-get update && sudo apt-get install -y libglm-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-tsan -DBUILD_SCENES=OFF -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+
+      - name: Build
+        run: cmake --build build-tsan -j
+
+      - name: Run under ThreadSanitizer
+        run: ./build-tsan/core_tests

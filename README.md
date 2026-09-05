@@ -34,6 +34,7 @@ convergence, an analytic rate, or a second implementation.
 | The C++ engine matches the Python one | Same scenario, same timestep, 730 steps | agree to **7.4e-14 AU** |
 | J2 perturbs orbits correctly | Propagated nodal precession vs. analytic secular rate | **0.06%** apart |
 | The Barnes-Hut tree is correct | At θ=0 it must reduce to exact pairwise summation | agree to **8.6e-16** |
+| Threading the force loop changes nothing | Bitwise comparison, 1 to 12 threads | **bit-identical**, and clean under TSan |
 | Sun-synchronous orbits fall out of the physics | Inclination that precesses once per year | **98.2°**, derived not assumed |
 
 That last one is the point of the whole exercise. A sun-synchronous orbit holds
@@ -117,6 +118,15 @@ the runtime and time per node visit is flat, but nodes visited per body grow as
 and a Plummer sphere is strongly centrally concentrated: a body in the dense
 core has many neighbours close enough to fail the opening criterion. The
 asymptotic bound is a claim about the input as much as the algorithm.
+
+![Thread scaling](figures/thread_scaling.png)
+
+The force loop is parallelised with `std::thread`. The tree is read-only once
+built and each body writes only its own slot, so no synchronisation is needed —
+and results are *bit-identical* at any thread count, which the test suite checks
+as exact equality rather than a tolerance. Speedup peaks at **6.6×**; the
+plateau past 8 threads is the hardware, since this machine has 8 performance
+cores and 4 efficiency cores.
 [`benchmarks/README.md`](benchmarks/README.md) has the measurements.
 
 ### `orbital` — integrator comparison

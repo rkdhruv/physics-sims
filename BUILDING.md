@@ -123,6 +123,16 @@ UndefinedBehaviorSanitizer catches signed overflow, bad shifts, and null
 dereferences. Both cost roughly 2x runtime, which is why they're a separate
 build directory rather than always on.
 
+ThreadSanitizer is a separate build again — it can't be combined with ASan —
+and is what checks the parallel force loop for races:
+
+```bash
+cmake -S . -B build-tsan -DBUILD_SCENES=OFF -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+cmake --build build-tsan -j8 && ./build-tsan/core_tests
+```
+
 The payoff over a plain debugger is that you get the offending line directly.
 A raw segfault gives you `exit code 139` and nothing else — worse, because
 stdout is block-buffered, a crash usually swallows all the output printed

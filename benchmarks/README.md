@@ -19,6 +19,7 @@ and the crossover point are the parts that transfer.
 | Barnes-Hut (θ=0.5) | n^1.61 over the same range, n^1.27 over the largest four sizes |
 | Crossover | ~512 bodies |
 | Speedup at 16,384 bodies | 4.3×, for 0.3% force error |
+| Thread scaling at 16,384 bodies | 6.6× at 8 threads, flat beyond |
 
 ## Why Barnes-Hut isn't n^1.1 here
 
@@ -48,3 +49,29 @@ asymptotic bound is a claim about the input as much as the algorithm.
 
 θ is the lever if speed matters more than accuracy: θ=1.0 opens far fewer cells,
 at ~4.5% force error instead of ~0.8%.
+
+## Thread scaling
+
+The complexity sweeps above run single-threaded, so the exponents measure the
+algorithms rather than the scheduler. Threading is measured separately at a
+fixed 16,384 bodies:
+
+| threads | ms/eval | speedup |
+|---|---|---|
+| 1 | 216.3 | 1.00× |
+| 2 | 119.8 | 1.81× |
+| 4 | 59.8 | 3.62× |
+| 6 | 40.9 | 5.29× |
+| 8 | 32.9 | 6.58× |
+| 10 | 34.8 | 6.21× |
+| 12 | 32.8 | 6.59× |
+
+Near-linear to 8, then flat. The M2 Pro has 8 performance cores and 4 efficiency
+cores; the efficiency cores are roughly a third the throughput and contribute
+almost nothing once the fast cores are saturated.
+
+The shortfall below the ideal line before the plateau has two parts. Tree
+construction stays serial at ~1% of runtime, which by Amdahl's law caps speedup
+at 7.5× on 8 threads — so about half the gap from the ideal 8×. The rest is
+memory: the traversal is pointer-chasing through a 97k-node array, and eight
+cores contend for the same cache and bandwidth.

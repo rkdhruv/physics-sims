@@ -15,6 +15,7 @@
 
 #include "core/BarnesHut.h"
 #include "core/ForceModel.h"
+#include "core/Parallel.h"
 #include "core/Scenarios.h"
 #include "core/System.h"
 
@@ -30,6 +31,10 @@ const std::vector<std::size_t> kTreeSizes = {
 // Repeat until this much time has elapsed, so small runs aren't dominated by
 // clock resolution.
 constexpr double kMinSeconds = 0.15;
+
+// Fixed size for the thread-scaling sweep: large enough that per-body work
+// dominates thread startup, small enough to sweep quickly.
+constexpr std::size_t kScalingSize = 16384;
 
 struct Timing {
   double seconds_per_eval = 0.0;
@@ -72,9 +77,13 @@ double forceError(const std::vector<glm::dvec3>& approx,
 
 int main() {
   const double softening = core::scenarios::kClusterSoftening;
-  const core::NBodyGravity direct(1.0, softening);
-  const core::BarnesHutGravity tree(1.0, 0.5, softening);
+  // Serial for the complexity sweeps: threading would fold scheduling into the
+  // measured exponents. The thread scaling is measured separately below.
+  const core::NBodyGravity direct(1.0, softening, 1);
+  const core::BarnesHutGravity tree(1.0, 0.5, softening, 1);
 
+  // Last column is force_error for the solver rows and thread count for the
+  // barnes-hut-threads rows.
   std::printf("solver,bodies,seconds,repetitions,force_error\n");
   std::fflush(stdout);
 
@@ -116,6 +125,25 @@ int main() {
     std::fprintf(stderr, "  tree     n=%-6zu %8.3f ms   force error %s\n", n,
                  t.seconds_per_eval * 1e3,
                  error_field.empty() ? "n/a" : error_field.c_str());
+  }
+
+  // Thread scaling at a fixed size, so the only variable is worker count.
+  std::fprintf(stderr, "\n  scaling at %zu bodies:\n", kScalingSize);
+  const core::System scaling_system = core::scenarios::cluster(kScalingSize);
+  double serial_seconds = 0.0;
+
+  for (unsigned t : {1u, 2u, 4u, 6u, 8u, 10u, 12u}) {
+    if (t > core::hardwareThreads()) break;
+    const core::BarnesHutGravity model(1.0, 0.5, softening, t);
+    const Timing timing = time(model, scaling_system);
+    if (t == 1) serial_seconds = timing.seconds_per_eval;
+
+    std::printf("barnes-hut-threads,%zu,%.9g,%d,%u\n", kScalingSize,
+                timing.seconds_per_eval, timing.repetitions, t);
+    std::fflush(stdout);
+    std::fprintf(stderr, "  %2u thread%s %8.2f ms   %.2fx\n", t,
+                 t == 1 ? " " : "s", timing.seconds_per_eval * 1e3,
+                 serial_seconds / timing.seconds_per_eval);
   }
 
   return 0;
