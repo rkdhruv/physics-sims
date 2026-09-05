@@ -92,6 +92,8 @@ started.
 
 ### `cluster` — N-body with a Barnes-Hut tree
 
+![4096-body cluster](docs/cluster.png)
+
 A self-gravitating Plummer sphere, started in virial equilibrium so it neither
 collapses nor disperses. `1` and `2` switch between exact O(n²) summation and
 the tree at runtime, with milliseconds per step in the title bar — at 4096
