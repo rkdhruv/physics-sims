@@ -61,9 +61,14 @@ class Octree {
 // Gravitation via a Barnes-Hut tree. Reproduces NBodyGravity exactly at
 // theta = 0 and approximates more aggressively as theta grows; 0.5 is the
 // conventional default.
+//
+// The tree is built serially, then traversed in parallel: it is read-only
+// during the force loop and each body writes its own slot, so no
+// synchronisation is needed and results are bit-identical at any thread count.
 class BarnesHutGravity : public ForceModel {
  public:
-  BarnesHutGravity(double G, double theta = 0.5, double softening = 0.0);
+  BarnesHutGravity(double G, double theta = 0.5, double softening = 0.0,
+                   unsigned threads = 0);
 
   using ForceModel::accelerations;
 
@@ -81,6 +86,7 @@ class BarnesHutGravity : public ForceModel {
   double G_;
   double theta_;
   double softening_;
+  unsigned threads_;
 
   // Mutable because the tree is a cache rebuilt per call, not part of the
   // model's state.

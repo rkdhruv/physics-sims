@@ -42,9 +42,12 @@ class ForceModel {
 // `softening` (eps) bounds the force at short range: without it a close
 // encounter produces an acceleration no fixed timestep can integrate. Defaults
 // to zero, which is the classical form.
+// `threads` splits the body loop across workers; 0 uses all cores, 1 is
+// serial. Each body writes only its own slot, so the arithmetic per body is
+// unchanged and results are bit-identical at any thread count.
 class NBodyGravity : public ForceModel {
  public:
-  explicit NBodyGravity(double G, double softening = 0.0);
+  explicit NBodyGravity(double G, double softening = 0.0, unsigned threads = 0);
 
   // Declaring the 3-argument override would otherwise hide the base class's
   // System overload -- C++ name lookup stops at the first scope with a match,
@@ -64,6 +67,7 @@ class NBodyGravity : public ForceModel {
  private:
   double G_;
   double softening_;
+  unsigned threads_;
 };
 
 // Satellites around a central body fixed at the origin, in km and seconds.

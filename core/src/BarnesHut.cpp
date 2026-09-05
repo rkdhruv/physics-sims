@@ -6,6 +6,8 @@
 
 #include <glm/geometric.hpp>
 
+#include "core/Parallel.h"
+
 namespace core {
 
 // Which octant of `node` contains `p`. Bit 0 is +x, 1 is +y, 2 is +z, so the
@@ -198,8 +200,9 @@ int Octree::depth() const {
 
 // ---------------------------------------------------------------------------
 
-BarnesHutGravity::BarnesHutGravity(double G, double theta, double softening)
-    : G_(G), theta_(theta), softening_(softening) {}
+BarnesHutGravity::BarnesHutGravity(double G, double theta, double softening,
+                                   unsigned threads)
+    : G_(G), theta_(theta), softening_(softening), threads_(threads) {}
 
 void BarnesHutGravity::accelerations(const std::vector<glm::dvec3>& positions,
                                      const std::vector<double>& masses,
@@ -210,10 +213,12 @@ void BarnesHutGravity::accelerations(const std::vector<glm::dvec3>& positions,
 
   tree_.build(positions, masses);
 
-  for (std::size_t i = 0; i < n; ++i) {
-    out[i] = tree_.acceleration(positions[i], static_cast<int>(i), theta_, G_,
-                                softening_);
-  }
+  parallelFor(n, threads_, [&](std::size_t begin, std::size_t end) {
+    for (std::size_t i = begin; i < end; ++i) {
+      out[i] = tree_.acceleration(positions[i], static_cast<int>(i), theta_, G_,
+                                  softening_);
+    }
+  });
 }
 
 double BarnesHutGravity::potentialEnergy(const std::vector<glm::dvec3>& positions,

@@ -7,6 +7,7 @@
 // than FAIL, so one missing function doesn't mask the results behind it;
 // skips still count against the exit code.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -17,6 +18,7 @@
 #include <glm/geometric.hpp>
 
 #include "core/BarnesHut.h"
+#include "core/Parallel.h"
 #include "core/Diagnostics.h"
 #include "core/Elements.h"
 #include "core/ForceModel.h"
@@ -721,6 +723,68 @@ void testBarnesHut() {
   }
 }
 
+// Threading the force loop must not change the answer at all. Each body writes
+// its own slot and the arithmetic per body is unchanged, so this is bitwise
+// equality, not a tolerance -- anything less would mean a real data race.
+void testParallel() {
+  std::printf("parallel force loop\n");
+
+  const double softening = core::scenarios::kClusterSoftening;
+  core::System s = core::scenarios::cluster(4096);
+
+  auto bitwiseIdentical = [](const std::vector<glm::dvec3>& a,
+                             const std::vector<glm::dvec3>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      if (a[i].x != b[i].x || a[i].y != b[i].y || a[i].z != b[i].z) return false;
+    }
+    return true;
+  };
+
+  try {
+    std::vector<glm::dvec3> serial, parallel;
+
+    core::BarnesHutGravity(1.0, 0.5, softening, 1).accelerations(s, serial);
+    for (unsigned t : {2u, 4u, 8u, 0u}) {  // 0 = all cores
+      core::BarnesHutGravity(1.0, 0.5, softening, t).accelerations(s, parallel);
+      char detail[96];
+      std::snprintf(detail, sizeof(detail),
+                    "Barnes-Hut: %u threads differs from serial", t);
+      CHECK_MSG(bitwiseIdentical(serial, parallel), detail);
+    }
+
+    core::NBodyGravity(1.0, softening, 1).accelerations(s, serial);
+    for (unsigned t : {2u, 8u, 0u}) {
+      core::NBodyGravity(1.0, softening, t).accelerations(s, parallel);
+      char detail[96];
+      std::snprintf(detail, sizeof(detail),
+                    "direct: %u threads differs from serial", t);
+      CHECK_MSG(bitwiseIdentical(serial, parallel), detail);
+    }
+
+    std::printf("  bit-identical across 1..%u threads\n", core::hardwareThreads());
+  } catch (const std::logic_error& e) {
+    skip(e.what());
+  }
+
+  // Every index must be written exactly once: chunks have to tile [0, count)
+  // with no gap and no overlap.
+  std::vector<int> visits(10000, 0);
+  core::parallelFor(visits.size(), 0, [&](std::size_t begin, std::size_t end) {
+    for (std::size_t i = begin; i < end; ++i) visits[i] = 1;
+  });
+  CHECK(std::count(visits.begin(), visits.end(), 1) ==
+        static_cast<long>(visits.size()));
+
+  // Degenerate inputs shouldn't spawn anything or run off the end.
+  core::parallelFor(0, 0, [](std::size_t, std::size_t) {
+    std::printf("  FAIL: empty range ran work\n");
+  });
+  std::size_t single = 0;
+  core::parallelFor(1, 8, [&](std::size_t b, std::size_t e) { single += e - b; });
+  CHECK(single == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -735,6 +799,7 @@ int main() {
   testJ2();
   testGroundTrack();
   testBarnesHut();
+  testParallel();
 
   std::printf("\n%d checks, %d failed, %d skipped\n", g_checks, g_failures, g_skips);
   if (g_skips > 0) {

@@ -5,14 +5,16 @@
 
 #include <glm/geometric.hpp>
 
+#include "core/Parallel.h"
+
 namespace core {
 
 // ---------------------------------------------------------------------------
 // NBodyGravity
 // ---------------------------------------------------------------------------
 
-NBodyGravity::NBodyGravity(double G, double softening)
-    : G_(G), softening_(softening) {}
+NBodyGravity::NBodyGravity(double G, double softening, unsigned threads)
+    : G_(G), softening_(softening), threads_(threads) {}
 
 void NBodyGravity::accelerations(const std::vector<glm::dvec3>& positions,
                                  const std::vector<double>& masses,
@@ -22,17 +24,19 @@ void NBodyGravity::accelerations(const std::vector<glm::dvec3>& positions,
 
   const double eps2 = softening_ * softening_;
 
-  for (std::size_t i = 0; i < n; ++i) {
-    for (std::size_t j = 0; j < n; ++j) {
-      if (i == j) continue;
+  parallelFor(n, threads_, [&](std::size_t begin, std::size_t end) {
+    for (std::size_t i = begin; i < end; ++i) {
+      for (std::size_t j = 0; j < n; ++j) {
+        if (i == j) continue;
 
-      const glm::dvec3 d = positions[j] - positions[i];
-      const double r2 = glm::dot(d, d) + eps2;  // dot, not length: avoids a sqrt
-      const double inv_r3 = 1.0 / (r2 * std::sqrt(r2));
+        const glm::dvec3 d = positions[j] - positions[i];
+        const double r2 = glm::dot(d, d) + eps2;  // dot, not length: avoids a sqrt
+        const double inv_r3 = 1.0 / (r2 * std::sqrt(r2));
 
-      out[i] += G_ * masses[j] * d * inv_r3;
+        out[i] += G_ * masses[j] * d * inv_r3;
+      }
     }
-  }
+  });
 }
 
 double NBodyGravity::potentialEnergy(const std::vector<glm::dvec3>& positions,

@@ -39,6 +39,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(core STATIC
   core/src/ForceModel.cpp
+  core/src/Parallel.cpp
   core/src/BarnesHut.cpp
   core/src/Integrator.cpp
   core/src/Diagnostics.cpp
@@ -46,7 +47,8 @@ add_library(core STATIC
   core/src/Scenarios.cpp
 )
 target_include_directories(core PUBLIC core/include)
-target_link_libraries(core PUBLIC glm::glm)
+find_package(Threads REQUIRED)
+target_link_libraries(core PUBLIC glm::glm Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # tests -- plain assert-based executable, no test framework dependency.
